@@ -148,7 +148,7 @@ pub fn write_catalog(
             .describe_instance_id();
         extension_schemas.pdf().properties().describe_all();
         extension_schemas.finish();
-        xmp.pdfa_part(2);
+        xmp.pdfa_part(3);
         xmp.pdfa_conformance("B");
     }
 
@@ -176,6 +176,17 @@ pub fn write_catalog(
         for &(name, dest_ref, ..) in &ctx.references.named_destinations.dests {
             names.insert(Str(name.as_str().as_bytes()), dest_ref);
         }
+    }
+
+    // Todo: I know there is only one entry right now...
+    if let Some((name, file_ref)) = ctx.references.embedded_files.into_iter().last() {
+        {
+            let mut name_dict = catalog.names();
+            let mut embedded_files = name_dict.embedded_files();
+            let mut names = embedded_files.names();
+            names.insert(Str(name.as_str().as_bytes()), file_ref);
+        }
+        catalog.insert(Name(b"AF")).array().typed().item(file_ref).finish();
     }
 
     // Insert the page labels.

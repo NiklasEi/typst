@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::hash::Hash;
 
 use ecow::{eco_format, EcoString};
-use pdf_writer::{Dict, Finish, Name, Ref};
+use pdf_writer::{Date, Dict, Finish, Name, Ref, Str, TextStr};
 use subsetter::GlyphRemapper;
 use typst::diag::{SourceResult, StrResult};
 use typst::syntax::Span;
@@ -24,7 +24,9 @@ use crate::extg::ExtGState;
 use crate::gradient::PdfGradient;
 use crate::image::EncodedImage;
 use crate::pattern::PatternRemapper;
-use crate::{PdfChunk, Renumber, WithEverything, WithResources};
+use crate::{
+    PdfChunk, Renumber, WithEverything, WithGlobalRefs, WithResources, FACTUR_X,
+};
 
 /// All the resources that have been collected when traversing the document.
 ///
@@ -223,6 +225,52 @@ pub fn alloc_resources_refs(
 
     let refs = refs_for(&context.resources, &mut chunk);
     Ok((chunk, refs))
+}
+
+pub fn build_embedded_files_references(
+    _ctx: &WithGlobalRefs,
+) -> SourceResult<(PdfChunk, HashMap<String, Ref>)> {
+    let mut chunk = PdfChunk::new();
+    let embedded_file_stream_ref = chunk.alloc.bump();
+
+    let mut embedded_files = HashMap::default();
+    embedded_files.insert(FACTUR_X.to_owned(), embedded_file_stream_ref);
+
+    Ok((chunk, embedded_files))
+}
+
+pub fn attach_zugferd(
+    ctx: &WithEverything,
+    zugferd: Option<&str>,
+) -> SourceResult<(PdfChunk, ())> {
+    let mut chunk = PdfChunk::new();
+    let Some(zugferd) = zugferd else { return Ok((chunk, ())) };
+    let file_spec_dict_ref = *ctx.references.embedded_files.get(FACTUR_X).unwrap();
+    let embedded_file_stream_ref = chunk.alloc.bump();
+
+    let mut embedded_file =
+        chunk.embedded_file(embedded_file_stream_ref, zugferd.as_bytes());
+    embedded_file
+        .subtype(Name(b"text/xml"))
+        .pair(Name(b"Length"), zugferd.as_bytes().len() as i32);
+    embedded_file.params().modification_date(Date::new(2023)).finish();
+    embedded_file.finish();
+
+    let mut file_spec = chunk.file_spec(file_spec_dict_ref);
+    file_spec
+        .path(Str(FACTUR_X.as_bytes()))
+        .unic_file(TextStr(FACTUR_X))
+        .description(TextStr("Factur-x invoice"))
+        .pair(Name(b"AFRelationship"), Name(b"Data"));
+    file_spec
+        .insert(Name(b"EF"))
+        .dict()
+        .pair(Name(b"F"), embedded_file_stream_ref)
+        .pair(Name(b"UF"), embedded_file_stream_ref)
+        .finish();
+    file_spec.finish();
+
+    Ok((chunk, ()))
 }
 
 /// Write the resource dictionaries that will be referenced by all pages.

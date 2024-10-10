@@ -42,8 +42,11 @@ use crate::named_destination::{write_named_destinations, NamedDestinations};
 use crate::page::{alloc_page_refs, traverse_pages, write_page_tree, EncodedPage};
 use crate::pattern::{write_patterns, PdfPattern};
 use crate::resources::{
-    alloc_resources_refs, write_resource_dictionaries, Resources, ResourcesRefs,
+    alloc_resources_refs, attach_zugferd, build_embedded_files_references,
+    write_resource_dictionaries, Resources, ResourcesRefs,
 };
+
+const FACTUR_X: &str = "factur-x.xml";
 
 /// Export a document into a PDF file.
 ///
@@ -68,10 +71,16 @@ pub fn pdf(document: &Document, options: &PdfOptions) -> SourceResult<Vec<u8>> {
                 gradients: builder.run(write_gradients)?,
                 patterns: builder.run(write_patterns)?,
                 ext_gs: builder.run(write_graphic_states)?,
+                embedded_files: if options.factur_x.is_some() {
+                    builder.run(build_embedded_files_references)?
+                } else {
+                    HashMap::new()
+                },
             })
         })?
         .phase(|builder| builder.run(write_page_tree))?
         .phase(|builder| builder.run(write_resource_dictionaries))?
+        .phase(|builder| builder.run(|ctx| attach_zugferd(ctx, options.factur_x)))?
         .export_with(write_catalog)
 }
 
@@ -98,6 +107,8 @@ pub struct PdfOptions<'a> {
     pub page_ranges: Option<PageRanges>,
     /// A list of PDF standards that Typst will enforce conformance with.
     pub standards: PdfStandards,
+    /// The content of a factur-x xml file
+    pub factur_x: Option<&'a str>,
 }
 
 /// Encapsulates a list of compatible PDF standards.
@@ -272,6 +283,8 @@ struct References {
     patterns: HashMap<PdfPattern, Ref>,
     /// The IDs of written external graphics states.
     ext_gs: HashMap<ExtGState, Ref>,
+    /// The names and references for embedded files
+    embedded_files: HashMap<String, Ref>,
 }
 
 /// At this point, the references have been assigned to all resources. The page
